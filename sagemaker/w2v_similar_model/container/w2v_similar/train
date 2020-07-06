@@ -1,0 +1,185 @@
+#!/usr/bin/env python
+from __future__ import print_function
+
+import os
+import json
+import sys
+import traceback
+
+import pandas as pd
+from gensim.models import word2vec
+
+import warnings
+warnings.filterwarnings('ignore')
+
+# These are the paths to where SageMaker mounts interesting things in your container.
+prefix = '/opt/ml/'
+
+input_path = prefix + 'input/data'
+output_path = os.path.join(prefix, 'output')
+model_path = os.path.join(prefix, 'model')
+param_path = os.path.join(prefix, 'input/config/hyperparameters.json')
+
+# This algorithm has a single channel of input data called 'train. Since we run in
+# File mode, the input files are copied to the directory specified here.
+channel_name = 'train'
+training_path = os.path.join(input_path, channel_name)
+
+# .pkl file
+#def load_train_data(input_file):
+#    with open(input_file, 'rb') as f:
+#        train_data = pickle.load(f)
+
+#    return train_data
+
+
+# .csv file
+#def load_train_data(input_file):
+#    """
+#
+#    Args:
+#        input_file(str): filepath for train data
+#
+#    Returns:
+#        train_data(dataframe):
+#
+#    """
+#    train_data = pd.read_csv(input_file, header=None)
+
+#    return train_data
+
+# .txt file
+def load_train_data(input_dir: str) -> word2vec.PathLineSentences:
+    """
+
+    Args:
+        input_dir(str): path of directory for train data
+          example for file
+          ```
+          word1 word2 word3
+          word1 word3 word4 word5
+          ...
+          ```
+    Returns:
+        sentences(word2vec.PathLineSentences):
+        ex.)
+        [['word1', 'word2', 'word3'],
+         ['word1', 'word3', 'word4'],
+         ['word3'],
+         ...
+        ]
+    """
+    sentences = word2vec.PathLineSentences(input_dir)
+
+    return sentences
+
+
+# return 'False' as False
+# @see https://qiita.com/koemu/items/fd333fd8ed14f31fbca6
+def str2bool(s: str) -> bool:
+    import distutils.util
+    return bool(distutils.util.strtobool(s))
+
+
+def train_model(sentences, params, hash=hash, trim_rule=None, callbacks=()) -> word2vec.Word2Vec:
+    """
+    refer word2vec.Word2Vec() object
+
+    Returns:
+        model(word2vec): word2vec object model
+    """
+    compute_loss = params.get('compute_loss', None)
+    max_final_vocab = params.get('max_final_vocab', None)
+    max_vocab_size = params.get('max_vocab_size', None)
+
+    model = word2vec.Word2Vec(
+        sentences,
+        size=int(params.get('size', 300)),
+        window=int(params.get('window', 5)),
+        iter=int(params.get('iter', 20)),
+        workers=int(params.get('workers', 10)),
+        alpha=float(params.get('alpha', 0.025)),
+        batch_words=int(params.get('batch_words', 10000)),
+        cbow_mean=int(params.get('cbow_mean', 1)),
+        min_alpha=float(params.get('min_alpha', 0.0001)),
+        min_count=int(params.get('min_count', 5)),
+        null_word=int(params.get('null_word', 0)),
+        ns_exponent=float(params.get('ns_exponent', 0.75)),
+        negative=int(params.get('negative', 5)),
+        hs=int(params.get('hs', 0)),
+        sample=float(params.get('sample', 1e-3)),
+        seed=int(params.get('seed', 1)),
+        sg=int(params.get('sg', 0)),
+        sorted_vocab=int(params.get('sorted_vocab', 1)),
+        corpus_file=params.get('corpus_file', None),
+        max_final_vocab=max_final_vocab if max_final_vocab is None else int(max_final_vocab),
+        max_vocab_size=max_vocab_size if max_vocab_size is None else int(max_vocab_size),
+        compute_loss=compute_loss if compute_loss is None else str2bool(compute_loss),
+        trim_rule=trim_rule,
+        callbacks=callbacks,
+        hashfxn=hash
+    )
+
+    return model
+
+
+# save as vectors and bin
+def save_model(model, model_path):
+    """
+    save vectors and binary model file
+
+    Args:
+        model(Word2Vec): gensim object
+        model_path(str): path for output model files
+
+    Returns:
+
+    """
+    model.wv.save_word2vec_format(model_path + '/vectors.txt', binary=False)
+    model.save(model_path + '/model.bin')
+
+
+# The function to execute the training.
+def train():
+    print('Starting the training.')
+    try:
+        print('load train data.')
+        # Read in any hyperparameters that the user passed with the training job
+        with open(param_path, 'r') as tc:
+            training_params = json.load(tc)
+
+        # Take the set of files and read them all into a single pandas dataframe
+        # load only one file
+        input_files = [os.path.join(training_path, file) for file in os.listdir(training_path)]
+        if len(input_files) == 0:
+            raise ValueError(('There are no files in {}.\n' +
+                              'This usually indicates that the channel ({}) was incorrectly specified,\n' +
+                              'the data specification in S3 was incorrectly specified or the role specified\n' +
+                              'does not have permission to access the data.').format(training_path, channel_name))
+
+        train_data = load_train_data(training_path)
+
+        # train
+        print('training...')
+        model = train_model(train_data, training_params)
+
+        save_model(model, model_path)
+        print('Training complete.')
+
+    except Exception as e:
+        # Write out an error file. This will be returned as the failureReason in the
+        # DescribeTrainingJob result.
+        trc = traceback.format_exc()
+        with open(os.path.join(output_path, 'failure'), 'w') as s:
+            s.write('Exception during training: ' + str(e) + '\n' + trc)
+        # Printing this causes the exception to be in the training job logs, as well.
+        print('Exception during training: ' + str(e) + '\n' + trc, file=sys.stderr)
+        # A non-zero exit code causes the training job to be marked as Failed.
+        sys.exit(255)
+
+
+if __name__ == '__main__':
+    train()
+
+    # A zero exit code causes the job to be marked a Succeeded.
+    sys.exit(0)

@@ -1,0 +1,28 @@
+{
+  "version": "2.0",
+  "app_name": "redshift_to_s3",
+  "stages": {
+    "dev": {
+      "lambda_functions": {
+        "main": {
+          "lambda_timeout": 600,
+          "subnet_ids": ["subnet-xxxx"],
+          "security_group_ids": ["sg-xxxx", "sg-xxxx"]
+        }
+      },
+      "manage_iam_role": false,
+      "iam_role_arn": "arn:aws:iam::xxxx:role/lambda-role",
+      "environment_variables": {
+        "CLUSTER_ENDPOINT": "xxxx.xxxx.ap-northeast-1.redshift.amazonaws.com",
+        "CLUSTER_IDENTIFIER": "xxxx",
+        "DB_PORT": "5439",
+        "DB_NAME": "db",
+        "DB_USER": "redshift_user",
+        "QUERY_PATH": "sql/test.sql",
+        "S3_BUCKET": "bucket",
+        "S3_PATH": "unload/path",
+        "OUTPUT_FILENAME": "test"
+      }
+    }
+  }
+}

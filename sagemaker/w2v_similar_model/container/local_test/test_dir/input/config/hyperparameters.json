@@ -1,0 +1,6 @@
+{
+  "size": 20,
+  "window": 30,
+  "iter": 20,
+  "workers": 10
+}
